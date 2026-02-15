@@ -29,6 +29,10 @@ void Heatmap::saveAndShow(){
     cv::normalize(blr,blr,0,255,cv::NORM_MINMAX);
     blr.convertTo(hm8,CV_8UC3);
     cv::addWeighted(first,0.5,hm8,0.5,0,ov);
+    cv::namedWindow("Combined Heatmap",cv::WINDOW_NORMAL);
+    cv::namedWindow("Heatmap Overlay",cv::WINDOW_NORMAL);
+    cv::resizeWindow("Combined Heatmap",1280,720);
+    cv::resizeWindow("Heatmap Overlay",1280,720);
     cv::imshow("Combined Heatmap",hm8);
     cv::imshow("Heatmap Overlay",ov);
     cv::imwrite("combined_heatmap.png",hm8);

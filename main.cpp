@@ -21,6 +21,12 @@ int main(int argc,char **argv){
     cv::Ptr<cv::BackgroundSubtractor> bg=cv::createBackgroundSubtractorMOG2(500,16,false);
     double fps=cap.get(cv::CAP_PROP_FPS); int delay=fps>0?(int)(1000.0/fps):30;
     cv::Mat frame; int idx=0; Heatmap hm;
+    cv::namedWindow("Football Player Detection",cv::WINDOW_NORMAL);
+    cv::namedWindow("Green Field Mask",cv::WINDOW_NORMAL);
+    cv::namedWindow("Players",cv::WINDOW_NORMAL);
+    cv::resizeWindow("Football Player Detection",1280,720);
+    cv::resizeWindow("Green Field Mask",1280,720);
+    cv::resizeWindow("Players",1280,720);
     std::vector<cv::Scalar> teamColors; teamColors.push_back(cv::Scalar(0,0,255)); teamColors.push_back(cv::Scalar(255,0,0)); teamColors.push_back(cv::Scalar(0,255,0));
     while(cap.read(frame)){
         std::vector<cv::Rect> boxes=detectPlayers(frame,bg);
