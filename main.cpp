@@ -82,6 +82,10 @@ int main(int argc, char **argv){
                         cv::FONT_HERSHEY_SIMPLEX, 0.5, teamDrawColors[colorIndex], 1);
         }
 
+        // Save one annotated frame as an example image for the report.
+        if(frameIndex == 50)
+            cv::imwrite("detection_example.png", frame);
+
         heatmap.update(frame, classifiedPlayers);
         frameIndex++;
 
