@@ -31,8 +31,7 @@ int main(int argc, char **argv){
 
     // MOG2 background subtraction — models each pixel as a Mixture of Gaussians
     // to separate moving foreground (players) from static background (field).
-    // Lecture 11_2 "Density estimation": Gaussian Mixture Models for density
-    // estimation; history=500 frames, varThreshold=16, detectShadows=false.
+    // Parameters: history=500 frames, varThreshold=16, detectShadows=false.
     cv::Ptr<cv::BackgroundSubtractor> bgSubtractor = cv::createBackgroundSubtractorMOG2(500, 16, false);
 
     double fps = videoCapture.get(cv::CAP_PROP_FPS);

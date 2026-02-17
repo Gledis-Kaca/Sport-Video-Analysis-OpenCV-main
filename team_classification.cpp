@@ -20,9 +20,7 @@ static const int NUM_TEAMS = 2;
 // extractJerseyColorFeature — Extract a CIELab color feature vector from the
 // upper body (jersey) region of a player ROI, excluding green field pixels and
 // shadow pixels. CIELab is perceptually uniform, meaning Euclidean distance in
-// Lab space correlates with perceived color difference (Lecture 11_1 "K-means",
-// slide 7: feature vector representation using color information; Lab 3:
-// HSV-based color segmentation to isolate regions).
+// Lab space correlates with perceived color difference.
 static cv::Vec3f extractJerseyColorFeature(const cv::Mat &playerRoi){
     // Focus on upper 60% of ROI — the jersey/shirt area is most discriminative
     // for team classification. Lower body (shorts, legs, feet) adds noise.
@@ -33,8 +31,7 @@ static cv::Vec3f extractJerseyColorFeature(const cv::Mat &playerRoi){
     cv::Mat hsvJersey;
     cv::cvtColor(jerseyRegion, hsvJersey, cv::COLOR_BGR2HSV);
 
-    // Mask out green field pixels and shadow pixels within the ROI
-    // (Lab 3: HSV color filtering; shadows have V<50).
+    // Mask out green field pixels and shadow pixels within the ROI (shadows have V<50).
     cv::Mat greenMask, shadowMask, excludeMask;
     cv::inRange(hsvJersey, cv::Scalar(40,40,40), cv::Scalar(90,255,255), greenMask);
     cv::inRange(hsvJersey, cv::Scalar(0,0,0), cv::Scalar(180,255,50), shadowMask);
@@ -68,8 +65,7 @@ static cv::Vec3f extractJerseyColorFeature(const cv::Mat &playerRoi){
 }
 
 // findClosestTrackedPlayer — Simple nearest-neighbor tracking using Euclidean
-// distance between box centers (Lecture 11_1 "K-means", slide 12: Euclidean
-// distance function for comparing feature vectors — here spatial position features).
+// distance between box centers.
 static int findClosestTrackedPlayer(const cv::Rect &currentBox,
                                      const std::map<int, std::pair<cv::Rect,int> > &trackedPlayers){
     int closestID = -1;
@@ -91,10 +87,10 @@ static int findClosestTrackedPlayer(const cv::Rect &currentBox,
 }
 
 // classifyPlayers — Assign each detected player to a team using K-means
-// clustering on CIELab color features (Lecture 11_1 "K-means": partition data
-// into k clusters by minimizing within-cluster sum of squares; k=2 for two teams).
-// Temporal anchoring stabilizes cluster assignments across frames by maintaining
-// exponential moving average of cluster centers over the first 10 frames.
+// clustering on CIELab color features. Partitions data into k=2 clusters by
+// minimizing within-cluster sum of squares. Temporal anchoring stabilizes
+// cluster assignments across frames by maintaining an exponential moving
+// average of cluster centers over the first 10 frames.
 std::vector<std::pair<cv::Rect,int> > classifyPlayers(const cv::Mat &frame, const std::vector<cv::Rect> &boxes){
     // Extract color features for each detected player.
     std::vector<cv::Vec3f> playerFeatures;
@@ -125,9 +121,8 @@ std::vector<std::pair<cv::Rect,int> > classifyPlayers(const cv::Mat &frame, cons
 
     cv::Mat clusterLabels, clusterCenters;
 
-    // K-means clustering — Lecture 11_1 "K-means", slide 17: "A simple clustering
-    // algorithm based on a fixed number of clusters (k)." Using k=2 for two teams,
-    // KMEANS_PP_CENTERS for smart initialization, 5 attempts to avoid local minima.
+    // K-means clustering with k=2 for two teams, KMEANS_PP_CENTERS for smart
+    // initialization, 5 attempts to avoid local minima.
     cv::kmeans(featureMatrix, NUM_TEAMS, clusterLabels,
                cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 10, 1.0),
                5, cv::KMEANS_PP_CENTERS, clusterCenters);

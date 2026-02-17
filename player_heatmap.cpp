@@ -17,8 +17,8 @@ Heatmap::Heatmap(){
 
 // update — Accumulate team-colored circles at each detection center into a
 // floating-point image. This builds a spatial density map of player positions
-// (Lecture 11_2 "Density estimation": estimating the underlying probability
-// density of player locations from discrete observations).
+// by estimating the underlying density of player locations from discrete
+// observations.
 void Heatmap::update(const cv::Mat &frame, const std::vector<std::pair<cv::Rect,int> > &classifiedPlayers){
     if(accum.empty()){
         accum = cv::Mat::zeros(frame.size(), CV_32FC3);
@@ -46,13 +46,12 @@ void Heatmap::saveAndShow(){
 
     cv::Mat blurredHeatmap, heatmapImage, overlayImage;
 
-    // Gaussian smoothing — Lecture 06_1 "Spatial filtering", Lecture 06_2
-    // "Linear filters": Gaussian kernel produces smooth, isotropic blurring
-    // to turn discrete detection points into a continuous density visualization.
+    // Gaussian smoothing to turn discrete detection points into a continuous
+    // density visualization.
     cv::GaussianBlur(accum, blurredHeatmap, cv::Size(0, 0), 15);
 
-    // Intensity normalization — Lecture 05_1 "Histogram equalization": mapping
-    // pixel values to the full [0,255] range to maximize visual contrast.
+    // Intensity normalization — map pixel values to the full [0,255] range
+    // to maximize visual contrast.
     cv::normalize(blurredHeatmap, blurredHeatmap, 0, 255, cv::NORM_MINMAX);
     blurredHeatmap.convertTo(heatmapImage, CV_8UC3);
 

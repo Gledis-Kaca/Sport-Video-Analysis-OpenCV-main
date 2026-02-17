@@ -8,19 +8,16 @@
 ********************************************************************************/
 #include "player_detection.h"
 
-// maskGreenField — Segment the playing field using HSV color thresholding
-// (Lab 3 "Mouse callback and color segmentation"; Lecture 10_3 "Thresholding Otsu").
+// maskGreenField — Segment the playing field using HSV color thresholding.
 // HSV is preferred over RGB because it separates chrominance from luminance,
-// making the green detection robust to illumination changes (Lab 3, slide 4).
+// making the green detection robust to illumination changes.
 static cv::Mat maskGreenField(const cv::Mat &hsvFrame){
     cv::Mat greenMask, dilatedMask, erodedMask, fieldMask;
 
-    // HSV green range — Lab 3 "Color segmentation": select hue range for the
-    // dominant field color (Lecture 10_3: threshold sensitivity to illumination).
+    // HSV green range for the dominant field color.
     cv::inRange(hsvFrame, cv::Scalar(40,40,40), cv::Scalar(90,255,255), greenMask);
 
-    // Morphological dilation then erosion to fill small holes in the field mask
-    // (Lecture 10_1 "Morphological operators": structuring element operations).
+    // Morphological dilation then erosion to fill small holes in the field mask.
     cv::Mat morphKernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5,5));
     cv::dilate(greenMask, dilatedMask, morphKernel);
     cv::erode(dilatedMask, erodedMask, morphKernel);
@@ -33,8 +30,8 @@ static cv::Mat maskGreenField(const cv::Mat &hsvFrame){
 
     fieldMask = cv::Mat::zeros(greenMask.size(), CV_8UC1);
 
-    // Region-based segmentation (Lecture 10_2): keep green contours above a
-    // minimum area threshold to filter noise while preserving the field shape.
+    // Keep green contours above a minimum area threshold to filter noise
+    // while preserving the field shape.
     for(size_t i = 0; i < fieldContours.size(); i++){
         if(cv::contourArea(fieldContours[i]) > 1000.0)
             cv::drawContours(fieldMask, fieldContours, (int)i, cv::Scalar(255), cv::FILLED);
@@ -45,21 +42,18 @@ static cv::Mat maskGreenField(const cv::Mat &hsvFrame){
 }
 
 // maskGreenPlayers — Isolate non-field pixels (potential players) within the
-// field-masked region using color-based segmentation (Lab 3; Lecture 10_3).
-// Inverts a combined mask of green + black + shadow pixels so that only
-// player-colored pixels remain.
+// field-masked region using color-based segmentation. Inverts a combined mask
+// of green + black + shadow pixels so that only player-colored pixels remain.
 static cv::Mat maskGreenPlayers(const cv::Mat &fieldRegionBgr){
     cv::Mat hsvImage;
     cv::cvtColor(fieldRegionBgr, hsvImage, cv::COLOR_BGR2HSV);
 
     cv::Mat greenMask, blackMask, shadowMask, excludeMask;
 
-    // Remove green field pixels — same HSV range as maskGreenField
-    // (Lab 3 "Color segmentation": HSV-based color filtering).
+    // Remove green field pixels — same HSV range as maskGreenField.
     cv::inRange(hsvImage, cv::Scalar(40,40,40), cv::Scalar(90,255,255), greenMask);
 
-    // Shadow suppression — Lecture 10_3 "Thresholding Otsu": threshold sensitivity
-    // to noise and non-uniform illumination. Shadows have low Value (brightness).
+    // Shadow suppression — shadows have low Value (brightness).
     // Masking all pixels with V<50 aggressively removes shadow regions.
     cv::inRange(hsvImage, cv::Scalar(0,0,0), cv::Scalar(180,255,50), shadowMask);
     cv::inRange(hsvImage, cv::Scalar(0,0,0), cv::Scalar(10,10,10), blackMask);
@@ -68,8 +62,8 @@ static cv::Mat maskGreenPlayers(const cv::Mat &fieldRegionBgr){
     cv::bitwise_or(excludeMask, shadowMask, excludeMask);
     cv::bitwise_not(excludeMask, excludeMask);
 
-    // Dilation to connect nearby player pixels — Lecture 10_1 "Morphological operators":
-    // dilation expands foreground regions, bridging small gaps in the player silhouette.
+    // Dilation to connect nearby player pixels — expands foreground regions,
+    // bridging small gaps in the player silhouette.
     int dilationRadius = 5;
     cv::Mat dilationKernel = cv::getStructuringElement(
         cv::MORPH_RECT,
@@ -85,10 +79,9 @@ static cv::Mat maskGreenPlayers(const cv::Mat &fieldRegionBgr){
     return excludeMask;
 }
 
-// mergeOverlappingBoxes — Agglomerative clustering of overlapping bounding boxes
-// (Lecture 11_1 "K-means", slide 14: agglomerative clustering merges clusters
-// recursively based on proximity). Here overlap/containment is used as the
-// similarity criterion to fuse fragmented detections into single player boxes.
+// mergeOverlappingBoxes — Agglomerative clustering of overlapping bounding boxes.
+// Overlap/containment is used as the similarity criterion to fuse fragmented
+// detections into single player boxes.
 static std::vector<cv::Rect> mergeOverlappingBoxes(const std::vector<cv::Rect> &inputBoxes){
     std::vector<cv::Rect> mergedBoxes;
     std::vector<bool> consumed(inputBoxes.size(), false);
@@ -151,25 +144,23 @@ std::vector<cv::Rect> detectPlayers(const cv::Mat &frame, cv::Ptr<cv::Background
 
     playerColorMask = maskGreenPlayers(fieldRegionBgr);
 
-    // Combine foreground motion mask with player color mask and restrict to field
-    // (Lecture 10_2 "Intro to segmentation": combining multiple segmentation cues).
+    // Combine foreground motion mask with player color mask and restrict to field.
     cv::bitwise_and(foregroundMask, playerColorMask, combinedMask);
     cv::bitwise_and(combinedMask, fieldMask, combinedMask);
 
-    // Morphological opening — Lecture 10_1 "Morphological operators", slide 16:
-    // "Opening: erosion + dilation. Effects: Removes thin protrusions."
-    // Eliminates small noise blobs and thin shadow remnants from the combined mask.
+    // Morphological opening (erosion + dilation) eliminates small noise blobs
+    // and thin shadow remnants from the combined mask.
     cv::Mat openingKernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5,5));
     cv::morphologyEx(combinedMask, combinedMask, cv::MORPH_OPEN, openingKernel);
 
-    // Contour extraction and bounding box filtering — Lecture 10_2 "Intro to
-    // segmentation": external contours delineate connected foreground regions.
+    // Contour extraction and bounding box filtering — external contours
+    // delineate connected foreground regions.
     std::vector<std::vector<cv::Point> > contours;
     std::vector<cv::Rect> playerBoxes;
     cv::findContours(combinedMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
     for(size_t i = 0; i < contours.size(); i++){
-        // Area filter: reject small noise blobs (Lecture 10_1: morphological size filtering).
+        // Area filter: reject small noise blobs.
         double contourArea = cv::contourArea(contours[i]);
         if(contourArea < 30) continue;
 
@@ -179,9 +170,8 @@ std::vector<cv::Rect> detectPlayers(const cv::Mat &frame, cv::Ptr<cv::Background
         if(boundingBox.width < 10 || boundingBox.height < 20 ||
            boundingBox.width > 100 || boundingBox.height > 200) continue;
 
-        // Aspect ratio constraint — Lecture 10_2 "Intro to segmentation": region
-        // properties (shape descriptors) distinguish player silhouettes from shadows.
-        // Players are taller than wide; shadows are wide and flat.
+        // Aspect ratio constraint — players are taller than wide;
+        // shadows are wide and flat.
         if(boundingBox.height < boundingBox.width) continue;
 
         playerBoxes.push_back(boundingBox);
