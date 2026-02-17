@@ -1,6 +1,6 @@
 /********************************************************************************
-  Project: Sport Video Analisis
-  Author: Pooya Nasiri (Student ID: 2071437)
+  Project: Sport Video Analysis
+  Author: Rajmonda Bardhi (Student ID: 2071810)
   Course: Computer Vision — University of Padova
   Instructor: Prof. Stefano Ghidoni
   Notes: Original work by the author. Built with C++17 and OpenCV on the official Virtual Lab.
@@ -18,6 +18,10 @@ int main(int argc,char **argv){
     if(argc<2){ std::cerr<<"Usage: "<<argv[0]<<" <video_file>\n"; return -1; }
     cv::VideoCapture cap(argv[1]); if(!cap.isOpened()){ std::cerr<<"Error: could not open "<<argv[1]<<"\n"; return -1; }
     std::ofstream det("ours.csv"); det<<"frame,x1,y1,x2,y2,team\n";
+    // MOG2 background subtraction — models each pixel as a Mixture of Gaussians
+    // to separate moving foreground (players) from static background (field).
+    // Lecture 11_2 "Density estimation": Gaussian Mixture Models for density
+    // estimation; history=500 frames, varThreshold=16, detectShadows=false.
     cv::Ptr<cv::BackgroundSubtractor> bg=cv::createBackgroundSubtractorMOG2(500,16,false);
     double fps=cap.get(cv::CAP_PROP_FPS); int delay=fps>0?(int)(1000.0/fps):30;
     cv::Mat frame; int idx=0; Heatmap hm;

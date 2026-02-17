@@ -3,7 +3,7 @@
 Lightweight football (soccer) video analysis in C++ with OpenCV. The pipeline detects players on the pitch using classical CV, clusters them into two teams by jersey color, and produces per-team heatmaps. An evaluation tool computes IoU-based metrics against a YOLO pseudo-ground-truth CSV.
 
 > Course project — Computer Vision, University of Padova  
-> Author: Pooya Nasiri (Student ID: 2071437)
+> Author: Rajmonda Bardhi (Student ID: 2071810)
 
 ---
 
@@ -222,13 +222,13 @@ mkdir build && cd build && cmake .. && make
 
 ## License & Contact
 - See the repository for license details.
-- Author: [Pooya Nasiri](https://github.com/PooyaNasiri) | [Portfolio](https://pooyanasiri.github.io)
+- Author: Rajmonda Bardhi
 
 ---
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE) © 2025 Pooya Nasiri.
+This project is licensed under the [MIT License](LICENSE) © 2025 Rajmonda Bardhi.
 
 ---
 

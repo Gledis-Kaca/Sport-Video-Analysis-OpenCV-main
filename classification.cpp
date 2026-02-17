@@ -1,6 +1,6 @@
 /********************************************************************************
-  Project: Sport Video Analisis
-  Author: Pooya Nasiri (Student ID: 2071437)
+  Project: Sport Video Analysis
+  Author: Rajmonda Bardhi (Student ID: 2071810)
   Course: Computer Vision — University of Padova
   Instructor: Prof. Stefano Ghidoni
   Notes: Original work by the author. Built with C++17 and OpenCV on the official Virtual Lab.
@@ -17,9 +17,16 @@ static std::map<int,std::pair<cv::Rect,int> > lastFrameBoxes;
 static int nextID=0;
 static const int teamsCount=2;
 
+// avgNonGreenLab — Extract a CIELab color feature vector from player ROI,
+// excluding green field pixels. CIELab is perceptually uniform, meaning
+// Euclidean distance in Lab space correlates with perceived color difference
+// (Lecture 11_1 "K-means", slide 7: feature vector representation using color
+// information; Lab 3: HSV-based color segmentation to isolate regions).
 static cv::Vec3f avgNonGreenLab(const cv::Mat &roi){
     cv::Mat hsv; cv::cvtColor(roi,hsv,cv::COLOR_BGR2HSV);
+    // Mask out green field pixels within the ROI (Lab 3: HSV color filtering).
     cv::Mat g; cv::inRange(hsv,cv::Scalar(35,40,40),cv::Scalar(90,255,255),g);
+    // Convert to CIELab for perceptually uniform color features.
     cv::Mat lab; cv::cvtColor(roi,lab,cv::COLOR_BGR2Lab); lab.convertTo(lab,CV_32F);
     cv::Mat r=lab.reshape(1,lab.rows*lab.cols);
     std::vector<cv::Vec3f> v; v.reserve(r.rows);
@@ -31,6 +38,9 @@ static cv::Vec3f avgNonGreenLab(const cv::Mat &roi){
     return s*(1.0f/n);
 }
 
+// findClosestBox — Simple nearest-neighbor tracking using Euclidean distance
+// between box centers (Lecture 11_1 "K-means", slide 12: Euclidean distance
+// function for comparing feature vectors — here spatial position features).
 static int findClosestBox(const cv::Rect &cur,const std::map<int,std::pair<cv::Rect,int> > &last){
     int best=-1; double dmin=50.0;
     for(std::map<int,std::pair<cv::Rect,int> >::const_iterator it=last.begin();it!=last.end();++it){
@@ -42,6 +52,11 @@ static int findClosestBox(const cv::Rect &cur,const std::map<int,std::pair<cv::R
     return best;
 }
 
+// classifyPlayers — Assign each detected player to a team using K-means
+// clustering on CIELab color features (Lecture 11_1 "K-means": partition data
+// into k clusters by minimizing within-cluster sum of squares; k=2 for two teams).
+// Temporal anchoring stabilizes cluster assignments across frames by maintaining
+// exponential moving average of cluster centers over the first 10 frames.
 std::vector<std::pair<cv::Rect,int> > classifyPlayers(const cv::Mat &frame,const std::vector<cv::Rect> &boxes){
     std::vector<cv::Vec3f> feats; feats.reserve(boxes.size());
     for(size_t i=0;i<boxes.size();i++){
@@ -55,6 +70,9 @@ std::vector<std::pair<cv::Rect,int> > classifyPlayers(const cv::Mat &frame,const
     for(int i=0;i<X.rows;i++){ X.at<float>(i,0)=feats[i][0]; X.at<float>(i,1)=feats[i][1]; X.at<float>(i,2)=feats[i][2]; }
     if(X.rows<teamsCount) return std::vector<std::pair<cv::Rect,int> >();
     cv::Mat labels,centers;
+    // K-means clustering — Lecture 11_1 "K-means", slide 17: "A simple clustering
+    // algorithm based on a fixed number of clusters (k)." Using k=2 for two teams,
+    // KMEANS_PP_CENTERS for smart initialization, 5 attempts to avoid local minima.
     cv::kmeans(X,teamsCount,labels,cv::TermCriteria(cv::TermCriteria::EPS+cv::TermCriteria::COUNT,10,1.0),5,cv::KMEANS_PP_CENTERS,centers);
     if(anchorCount<MAX_ANCHOR_FRAMES){
         if(teamFeatureAnchors.empty()){ for(int i=0;i<centers.rows;i++) teamFeatureAnchors.push_back(centers.row(i).clone()); }

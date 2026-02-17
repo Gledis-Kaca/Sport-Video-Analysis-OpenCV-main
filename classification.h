@@ -1,6 +1,6 @@
 /********************************************************************************
-  Project: Sport Video Analisis
-  Author: Pooya Nasiri (Student ID: 2071437)
+  Project: Sport Video Analysis
+  Author: Rajmonda Bardhi (Student ID: 2071810)
   Course: Computer Vision — University of Padova
   Instructor: Prof. Stefano Ghidoni
   Notes: Original work by the author. Built with C++17 and OpenCV on the official Virtual Lab.

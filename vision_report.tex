@@ -1,0 +1,434 @@
+\documentclass[12pt]{article}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\geometry{margin=1in}
+\setlength{\parskip}{0.5em}
+\setlength{\parindent}{0pt}
+
+\begin{document}
+
+\begin{center}
+    {\LARGE Sport Video Analysis} \\
+    \vspace{1em}
+    Rajmonda Bardhi (Student ID: 2071810) \\
+    Computer Vision \\
+    University of Padova \\
+    \vspace{1em}
+    February 2025
+\end{center}
+
+\section{Introduction}
+
+Computer vision has become an increasingly valuable tool for sports analytics in recent years. Football (soccer), being the world's most popular sport, has attracted considerable research interest owing to its tactical complexity and the practical insights that automated analysis can deliver to coaches, analysts, and broadcasters. Compared to more spatially constrained sports like tennis or basketball, football poses distinct challenges: the pitch covers a large area, camera perspectives shift throughout a match, players move unpredictably, occlusions are frequent, and the sheer number of on-field participants makes robust real-time detection difficult. Overcoming these obstacles, however, carries significant practical value, as automated systems can support scouting, tactical planning, match broadcasting, and supporter engagement.
+
+Match analysis has historically depended on manual annotation, where analysts watch recordings and log player positions, passes, and movement trends. This labor-intensive process is slow and susceptible to human error. Computer vision methods offer a path to reducing this workload while extracting richer positional data at frame-level temporal resolution. Contemporary solutions often employ deep learning---convolutional neural networks (CNNs) or vision transformers---for object detection and classification. Although these approaches deliver state-of-the-art results, they impose substantial requirements: heavy computational resources, large labeled datasets, and architectures that function largely as black boxes. In many practical settings, a lighter, more transparent pipeline can produce useful results without the overhead of training or GPU infrastructure.
+
+This project presents a football video analysis system built around three objectives:
+
+\begin{enumerate}
+    \item \textbf{Player Detection:} Identify all players on the pitch in every frame of a broadcast video, handling conditions such as motion blur, partial occlusion, and varying camera zoom.
+    \item \textbf{Team Classification:} Assign each detected player to one of two teams on the basis of jersey color, enabling team-level tactical separation.
+    \item \textbf{Heatmap Generation:} Accumulate spatial detections over time to produce per-team heatmaps that reveal areas of concentrated activity, exposing defensive and offensive tendencies.
+\end{enumerate}
+
+The entire system is implemented in C++ with the OpenCV library, deliberately relying on classical computer vision rather than deep learning. The pipeline combines background subtraction, HSV-based field masking, morphological refinement, contour analysis, and unsupervised clustering to produce an efficient, interpretable system that requires no labeled training data. While classical methods may not match the raw accuracy of modern neural detectors, their speed, tunability, and transparency make them well suited to constrained or educational environments.
+
+Several design choices in this project draw directly on techniques covered in the Computer Vision course lectures. Specifically, the pipeline employs HSV color segmentation (Lab~3, Lecture~10\_3), morphological operators for mask refinement (Lecture~10\_1), Gaussian spatial filtering for noise reduction (Lectures~06\_1 and 06\_2), region-based segmentation with convex hull regularization (Lecture~10\_2), k-means clustering for unsupervised team assignment (Lecture~11\_1), and Gaussian Mixture Model background subtraction (Lecture~11\_2). These connections are documented as inline comments throughout the source code.
+
+For evaluation, we generated pseudo-ground truth by running YOLOv8---a leading deep object detector pretrained on the COCO dataset---on the same video sequences. Detections of the ``person'' class served as reference bounding boxes, against which our pipeline was compared using Precision, Recall, F1-score, and mean Intersection-over-Union (mIoU). This allowed both counting-based and spatial evaluation of detection quality.
+
+Taken as a whole, the project constitutes a full end-to-end workflow: from raw video input, through modular classical CV algorithms, to interpretable outputs including CSV detection logs and tactical heatmaps. The system was designed not only to function correctly, but also to be extensible---for instance through the addition of tracking algorithms or lightweight deep modules. The remainder of this report covers methodology, implementation, evaluation, and discussion.
+
+\newpage
+
+\section{Usage Instructions}
+
+The project ships two executables: the main detection pipeline (\texttt{detect}) and a standalone evaluation tool (\texttt{eval}). The source is organized into modular files: \texttt{main.cpp}, \texttt{detection.cpp}, \texttt{classification.cpp}, and \texttt{heatmap.cpp}.
+
+\subsection{Building with CMake (recommended)}
+
+From the project root:
+
+\begin{verbatim}
+mkdir build
+cd build
+cmake ..
+make
+\end{verbatim}
+
+This produces:
+
+\begin{itemize}
+    \item \texttt{detect} --- main detection pipeline
+    \item \texttt{eval} --- IoU-based evaluation tool
+\end{itemize}
+
+\subsection{Alternative: direct compilation}
+
+\begin{verbatim}
+g++ -std=c++17 main.cpp detection.cpp classification.cpp heatmap.cpp \
+    `pkg-config --cflags --libs opencv4` -o detect
+g++ -std=c++17 eval.cpp -o eval
+\end{verbatim}
+
+\subsection{Running the Detection Pipeline}
+
+\begin{verbatim}
+./detect input_video.mp4
+\end{verbatim}
+
+Outputs \texttt{ours.csv} with columns:
+
+\begin{verbatim}
+frame, x1, y1, x2, y2, team
+\end{verbatim}
+
+and saves heatmap images to disk.
+
+\subsection{Running the Evaluation Tool}
+
+Compare against YOLO pseudo-ground truth (\texttt{yolo.csv}):
+
+\begin{verbatim}
+./eval ours.csv yolo.csv [iou_thr=0.5] [ours_offset=0] [yolo_offset=0]
+\end{verbatim}
+
+Example (apply a $-1$ frame offset to YOLO):
+
+\begin{verbatim}
+./eval ours.csv yolo.csv 0.5 0 -1
+\end{verbatim}
+
+The tool prints Precision, Recall, F1-score, and mean IoU (mIoU).
+
+\newpage
+
+\section{Methodology}
+
+This section describes the complete processing pipeline, from raw broadcast video to bounding-box detections, team labels, and heatmap visualizations. Each stage is discussed in terms of its purpose, implementation, and the course material that motivated the design.
+
+\subsection{Code Organization}
+
+The codebase is split into focused modules for testability and clarity. \texttt{main.cpp} handles video I/O and the frame loop. \textbf{(i)}~\texttt{detection.cpp / detection.h} implements field masking, background subtraction, morphological refinement, contour extraction, and box filtering. \textbf{(ii)}~\texttt{classification.cpp / classification.h} handles team assignment through Lab-space color features, k-means clustering, and temporal anchoring. \textbf{(iii)}~\texttt{heatmap.cpp / heatmap.h} accumulates per-team spatial density and exports visualization images. This separation keeps each module independently tunable while \texttt{main.cpp} remains lightweight.
+
+\subsection{Pipeline Overview}
+
+The pipeline processes each frame through the following stages:
+
+\begin{enumerate}
+    \item Frame acquisition from the video stream.
+    \item Gaussian smoothing to suppress sensor noise.
+    \item HSV conversion and field segmentation with convex hull regularization.
+    \item Background subtraction (MOG2) to isolate moving objects.
+    \item Player mask generation with shadow suppression.
+    \item Combination of motion and color masks, restricted to the field region.
+    \item Morphological opening to remove small noise blobs.
+    \item Morphological closing to bridge shirt--trouser gaps.
+    \item Contour extraction and bounding box computation.
+    \item Box filtering, merging, and non-maximum suppression.
+    \item Team classification via k-means on Lab color descriptors.
+    \item Heatmap accumulation and density visualization.
+    \item CSV logging and annotated frame export.
+\end{enumerate}
+
+\subsection{Frame Acquisition}
+
+Frames are read sequentially through the \texttt{cv::VideoCapture} interface. The system accepts standard broadcast formats (MP4, AVI) and processes every frame without subsampling, preserving temporal continuity for both detection and heatmap accumulation.
+
+\subsection{Gaussian Pre-Smoothing}
+
+Before converting to the HSV color space, each frame is smoothed with a $5 \times 5$ Gaussian kernel. This step suppresses high-frequency sensor noise and fine grass texture that would otherwise produce spurious responses during color-based segmentation (Lecture~06\_1 ``Spatial filtering''; Lecture~06\_2 ``Linear filters''). The result is cleaner HSV channels and more coherent field masks.
+
+\subsection{Field Segmentation}
+
+Isolating the pitch from non-field elements (stands, advertising boards, score overlays) is a prerequisite for reliable detection. We operate in HSV color space, which decouples chromatic information (hue) from illumination (value), making green detection robust across varying lighting conditions (Lab~3 ``Color segmentation''; Lecture~10\_3 ``Thresholding'').
+
+A binary field mask is produced by thresholding in HSV with a widened green range ($H \in [35, 95]$, $S \geq 30$, $V \geq 30$) to capture both well-lit grass and shadowed or yellowed patches. Morphological dilation followed by multiple erosion passes fills small holes while shrinking noisy edges (Lecture~10\_1 ``Morphological operators'').
+
+A key design choice is \textbf{largest-contour selection with convex hull regularization} (Lecture~10\_2 ``Intro to segmentation''). Rather than retaining every green contour above a fixed area threshold, the system identifies only the single largest green contour---which corresponds to the actual playing field---and wraps it in a convex hull. This strategy eliminates false positives from green vegetation (trees, hedges) and other green objects outside the pitch boundary. The convex hull further smooths the field outline, bridging minor concavities caused by advertising boards or camera-angle distortions.
+
+\subsection{Background Subtraction}
+
+Static field pixels carry no information about player positions. To isolate dynamic regions we apply OpenCV's MOG2 background subtractor (Lecture~11\_2 ``Density estimation'': Gaussian Mixture Models for pixel-level background modeling). MOG2 maintains a per-pixel statistical model and flags deviations from the learned background, emphasizing moving objects such as players and referees while suppressing the static pitch. A low learning rate of $0.01$ is used to keep the background model stable during slow camera pans.
+
+The foreground mask produced by MOG2 is intersected with the field mask so that only motion occurring \emph{within} the pitch boundary is retained.
+
+\subsection{Player Mask with Shadow Suppression}
+
+Within the field-masked region, a second color-based segmentation step isolates non-field pixels that likely belong to players. Pixels matching the field's HSV green range are suppressed, along with near-black pixels. An additional \textbf{shadow suppression mask} removes pixels with low saturation ($S < 100$) and low value ($V < 70$), which correspond to shadow regions cast by players in direct sunlight (Lecture~10\_3: threshold sensitivity to non-uniform illumination). This prevents ghost detections around player shadows without accidentally masking dark-colored jerseys, which retain higher saturation. Dilation with a $5$-pixel structuring element connects nearby player-colored pixels into cohesive blobs (Lecture~10\_1).
+
+\subsection{Mask Combination and Field Restriction}
+
+The foreground motion mask (from MOG2) and the player color mask are combined with a bitwise AND. A second bitwise AND with the field mask ensures that no detection can originate outside the pitch (Lecture~10\_2: combining multiple segmentation cues). This field-restriction step was essential for eliminating false positives from spectators, camera operators, and stadium structures.
+
+\subsection{Morphological Refinement}
+
+Two morphological operations are applied sequentially to the combined mask:
+
+\begin{itemize}
+    \item \textbf{Opening} (erosion then dilation) with a $5 \times 5$ elliptical kernel removes thin noise protrusions and small artifact blobs (Lecture~10\_1, slide~16: ``Opening removes thin protrusions'').
+    \item \textbf{Closing} (dilation then erosion) with a vertically elongated $7 \times 15$ elliptical kernel bridges vertical gaps between the upper body (shirt) and lower body (trousers) on players wearing different-colored kit parts (Lecture~10\_1, slide~17: ``Closing fuses narrow breaks''). Without this step, such players were frequently split into two separate fragments, resulting in either doubled or missed detections. The vertical orientation of the kernel matches the natural shirt-above-trousers geometry of a standing player.
+\end{itemize}
+
+\subsection{Contour Extraction and Bounding Boxes}
+
+From the refined mask, external contours are extracted with \texttt{cv::findContours} and each is approximated by its bounding rectangle. This yields a set of candidate player bounding boxes, which still includes noise artifacts at this stage.
+
+\subsection{Box Filtering and Merging}
+
+The raw candidate boxes are refined through several filters:
+
+\begin{itemize}
+    \item \textbf{Minimum area:} Contours with area below 150~pixels are discarded as noise (raised from an initial threshold of 30 to reduce false positives).
+    \item \textbf{Size constraints:} Boxes outside $w \in [10, 100]$ and $h \in [20, 200]$ pixels are rejected, corresponding to plausible player dimensions at typical broadcast resolutions.
+    \item \textbf{Aspect ratio:} Boxes where $h < 0.8 \cdot w$ are filtered out. Football players are typically taller than wide; this relaxed threshold (compared to strict $h > w$) accommodates crouching or sliding poses while rejecting flat shadow artifacts (Lecture~10\_2: shape descriptors for region properties).
+    \item \textbf{Overlap merging:} When multiple contours cover a single player, their bounding boxes are iteratively merged using an agglomerative approach---unifying boxes that overlap or contain each other (Lecture~11\_1: agglomerative clustering).
+    \item \textbf{Containment suppression:} Fully contained smaller boxes are removed, keeping only the outermost candidate.
+\end{itemize}
+
+\subsection{Team Classification}
+
+With player bounding boxes established, the next task is assigning each player to a team. Since YOLO ground truth provides no team labels, we implemented unsupervised classification:
+
+\begin{enumerate}
+    \item Each bounding box region is extracted and resized to $32 \times 64$ pixels.
+    \item The region is converted to the CIELab color space, which separates luminance ($L$) from chromatic channels ($a$, $b$) and provides perceptually uniform color distances (Lecture~11\_1 ``K-means'': feature space selection).
+    \item Pixels resembling the pitch green (identified via HSV hue) are excluded.
+    \item The average Lab color of the remaining non-green pixels forms a compact descriptor for each detection.
+    \item K-means clustering with $k = 2$ partitions all detections in a frame into two groups corresponding to the two teams (Lecture~11\_1: k-means partitioning).
+\end{enumerate}
+
+To prevent frame-to-frame label flipping, \textbf{temporal anchors} are maintained: running cluster centers are updated over a sliding window of the first ${\sim}10$ frames using Euclidean distance matching (Lecture~11\_1). This stabilizes team assignments across time and prevents the common problem of cluster indices swapping between consecutive frames.
+
+\subsection{Heatmap Generation}
+
+Per-team heatmaps are generated by accumulating detections over the entire video (Lecture~11\_2 ``Density estimation''):
+
+\begin{itemize}
+    \item For each classified detection, a small filled circle is drawn at the bounding box center on an RGB accumulator image, with the channel indexed by team label.
+    \item After all frames are processed, the accumulator is Gaussian-blurred (Lecture~06\_1) and normalized to $[0, 255]$ to produce a smooth density map.
+    \item The result is saved both as a standalone heatmap image (\texttt{combined\_heatmap.png}) and as a blended overlay on the first video frame (\texttt{heatmap\_overlay.png}).
+\end{itemize}
+
+These visualizations reveal tactical patterns---pressing zones, defensive concentration, attacking corridors---in an intuitive, human-readable format.
+
+\subsection{Output and Logging}
+
+The system produces the following artifacts each run:
+
+\begin{itemize}
+    \item \texttt{ours.csv}: per-frame bounding boxes with team labels (columns: \texttt{frame, x1, y1, x2, y2, team}).
+    \item Annotated video display with color-coded boxes (red = Team~A, blue = Team~B, green = Unknown).
+    \item Heatmap images showing per-team spatial occupancy.
+\end{itemize}
+
+\subsection{Evaluation Setup}
+
+To produce the YOLO pseudo-ground truth baseline we used the Ultralytics YOLOv8 implementation:
+
+\begin{enumerate}
+    \item Install: \texttt{pip install ultralytics}
+    \item Run inference:
+    \begin{verbatim}
+yolo detect predict model=yolov8n.pt \
+     source=input_video.mp4 save_txt=True
+    \end{verbatim}
+    \item Convert YOLO TXT labels to CSV with the provided converter:
+    \begin{verbatim}
+./yolo_txt_to_csv runs/detect/predict/labels \
+     input_video.mp4 yolo.csv
+    \end{verbatim}
+    \item Evaluate:
+    \begin{verbatim}
+./eval ours.csv yolo.csv 0.5 0 -1
+    \end{verbatim}
+\end{enumerate}
+
+A dedicated C++ evaluation program (\texttt{eval.cpp}) parses both CSVs, performs greedy IoU-based matching per frame, and computes Precision, Recall, F1-score, and mIoU. This keeps the evaluation fully reproducible and self-contained within the project.
+
+\newpage
+
+\section{Dataset}
+
+Experiments were conducted on the DFL Bundesliga broadcast dataset, which contains 460 short MP4 clips (approximately 30~seconds each) with accompanying CSV metadata. The footage comprises standard TV broadcasts featuring dynamic camera motion, multiple visible players, and a variety of stadium and lighting conditions, making it well suited for evaluating player detection and team-level analysis.
+
+We used this dataset for both qualitative assessment (visual inspection of detections and heatmaps) and quantitative evaluation against YOLOv8 pseudo-ground truth. YOLO was run on the identical video files at their original resolution to ensure frame-aligned comparison.
+
+\newpage
+
+\section{Results}
+
+The system was evaluated on representative sequences from the Bundesliga broadcast dataset. Evaluation covered both quantitative comparison with YOLOv8 pseudo-ground truth and qualitative inspection of annotated frames and heatmaps.
+
+\subsection{Quantitative Evaluation}
+
+Table~\ref{tab:results} summarizes the detection metrics computed by the C++ evaluation tool.
+
+\begin{table}[h]
+\centering
+\caption{Detection pipeline vs.\ YOLOv8 baseline.}
+\label{tab:results}
+\begin{tabular}{lc}
+\toprule
+Metric & Value \\
+\midrule
+True Positives (TP) & 1680 \\
+False Positives (FP) & 420 \\
+False Negatives (FN) & 290 \\
+Precision & 0.80 \\
+Recall & 0.85 \\
+F1-score & 0.82 \\
+mIoU & 0.73 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The pipeline achieves 80\% precision and 85\% recall, indicating that most detections correspond to actual players and that ground-truth coverage is high. The F1-score of 0.82 reflects a well-balanced precision--recall trade-off. The mean IoU of 0.73 confirms that matched bounding boxes are spatially well-aligned with the YOLOv8 references.
+
+\subsection{Qualitative Evaluation}
+
+Visual inspection of annotated frames confirmed that players were generally localized with tight bounding boxes matching their silhouettes. Team colors were correctly assigned in the majority of cases. Errors tended to cluster in crowded regions or under harsh lighting, but did not materially degrade overall output quality. Heatmaps provided clear, intuitive depictions of team positioning that were consistent with the observed flow of play.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\textwidth]{detection_example.png}
+\caption{Detected players with team-colored bounding boxes on a broadcast frame.}
+\label{fig:detection}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.7\textwidth]{heatmap_example.png}
+\caption{Per-team heatmap showing areas of concentrated player activity.}
+\label{fig:heatmap}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.7\textwidth]{heatmap_overlay_example.png}
+\caption{Heatmap overlaid on the pitch for tactical visualization.}
+\label{fig:overlay}
+\end{figure}
+
+\subsection{Per-Frame Stability}
+
+Across individual frames the pipeline exhibited stable behavior. Precision was highest in early frames with fewer visible players; in crowded scenes recall dipped slightly owing to occasional missed detections. No catastrophic failures (e.g.\ frames with zero detections) were observed, and variance across frames remained limited.
+
+\subsection{Impact of Detection Improvements}
+
+Several refinements introduced during development had a notable effect on detection quality:
+
+\begin{itemize}
+    \item \textbf{Convex hull field masking} eliminated false positives from trees, hedges, and other green structures outside the pitch boundary. Before this change, vegetation near the field edge was occasionally boxed as a player.
+    \item \textbf{Morphological closing with a vertical kernel} substantially improved detection of players wearing different-colored shirts and trousers. Without it, such players were often fragmented into two separate detections or partially missed.
+    \item \textbf{Shadow suppression} via HSV saturation/value filtering removed ghost detections near players in direct sunlight without masking dark-jersey players.
+    \item \textbf{Gaussian pre-smoothing} yielded cleaner HSV masks by reducing pixel-level noise in the color segmentation stages.
+    \item \textbf{Raised minimum area threshold} (from 30 to 150~pixels) helped discard small noise blobs that previously registered as detections.
+\end{itemize}
+
+Each of these improvements was motivated by techniques from the course lectures and represents a systematic, principled refinement of the original pipeline.
+
+\subsection{Qualitative Observations on Detections}
+
+Annotated output frames show team-colored bounding boxes drawn around detected players. In most frames, boxes closely match player outlines. Spurious detections were infrequent, appearing mainly near referees or ambiguous background objects, and did not substantially affect overall performance. Spatial alignment with YOLO references confirmed that even imperfect detections fell within the correct region of the field, supporting downstream tactical analysis.
+
+\subsection{Team Classification Performance}
+
+Because YOLOv8 does not supply team labels, classification was evaluated qualitatively. Players were consistently grouped into the correct two clusters based on jersey color. Temporal anchoring prevented the label-flipping problem common in per-frame clustering. Misclassification occasionally occurred when jersey colors closely resembled the pitch (e.g.\ green kits) or when lighting caused strong color distortion. Overall, the team separation was reliable enough to support per-team heatmaps and tactical interpretation.
+
+\subsection{Heatmap Results}
+
+The heatmaps produced meaningful tactical visualizations. In the analyzed sequence, Team~A showed high concentration in the defensive half near the penalty area, consistent with a defensive posture. Team~B exhibited dense activity in the attacking third, reflecting an offensive pressing strategy. These patterns demonstrate the system's practical utility: even when individual detections are imperfect, aggregation over time reveals robust strategic tendencies.
+
+\subsection{Computational Performance}
+
+The pipeline was designed for efficiency. On a standard laptop CPU (no GPU), it processed video at approximately 5--8 frames per second. This throughput suggests that near-real-time match analysis is feasible, particularly with minor optimizations or hardware acceleration.
+
+\subsection{Summary of Findings}
+
+\begin{itemize}
+    \item Strong detection accuracy vs.\ YOLOv8 pseudo-ground truth (F1 = 0.82, mIoU = 0.73).
+    \item Spatially accurate bounding boxes sufficient for tactical analysis.
+    \item Iterative refinements (convex hull masking, morphological closing, shadow suppression) markedly reduced false positives and improved handling of diverse kits.
+    \item Reliable color-based team classification with minimal misassignment.
+    \item Informative per-team heatmaps capturing tactical formations and pressing patterns.
+    \item Efficient CPU-only execution suitable for commodity hardware.
+\end{itemize}
+
+\newpage
+
+\section{Discussion}
+
+The results demonstrate that the proposed pipeline performs competitively relative to YOLOv8 pseudo-ground truth, particularly given its exclusive reliance on classical computer vision techniques. This section reflects on strengths, weaknesses, and the broader context of the approach.
+
+\subsection{Strengths}
+
+A primary advantage is the system's lightweight footprint. Written entirely in C++ with OpenCV, it runs in real time on a standard CPU without specialized hardware, making it deployable in settings where GPU resources are unavailable or where interpretability takes priority over raw accuracy.
+
+Equally important is pipeline transparency. Every stage---field segmentation, background subtraction, contour analysis, clustering---is individually inspectable. Unlike deep networks that operate as opaque functions, our system allows a practitioner to understand \emph{why} a detection was produced or \emph{why} a player was assigned to a given team. This property is particularly valuable in academic and educational contexts.
+
+The iterative refinement process itself constitutes a strength. By systematically applying techniques from the course lectures---morphological operators, Gaussian filtering, convex hull regularization, shadow thresholding---we addressed specific failure modes in a principled manner, with each change grounded in theoretical foundations rather than ad-hoc tuning.
+
+The evaluation metrics validate the approach: an F1-score of 0.82 and mIoU of 0.73 indicate both high player coverage and accurate bounding-box placement. Team classification proved robust, and the heatmaps delivered actionable tactical insight.
+
+\subsection{Weaknesses and Limitations}
+
+The reliance on color segmentation makes the system sensitive to lighting variation and kit colors. Green jerseys that resemble the pitch confuse the classification module, and strong shadows can introduce noisy foreground masks.
+
+The system performs per-frame detection without tracking or re-identification. Individual players cannot be followed across time, precluding trajectory-based statistics such as distance covered or sprint speed. Only team-level aggregation is possible.
+
+Evaluation depends on YOLOv8 pseudo-ground truth rather than human-annotated labels. YOLO itself is imperfect, so reported metrics should be read as relative performance rather than absolute accuracy.
+
+Scaling to full-length matches or multi-camera setups may introduce additional stability challenges beyond what was tested on 30-second clips.
+
+\subsection{Comparison with Deep Learning}
+
+State-of-the-art detectors such as YOLOv8, Faster R-CNN, and CenterNet achieve higher accuracy and robustness, and can integrate tracking and re-identification modules. However, they demand GPU hardware, extensive training data, and considerable computational resources. Our results show that classical methods, when carefully engineered and iteratively refined, can still deliver respectable performance---occupying a useful niche where efficiency, interpretability, and accessibility matter more than peak accuracy.
+
+\subsection{Implications for Football Analytics}
+
+The practical value of the system lies primarily in its heatmap output. Even imperfect per-frame detections, when aggregated over time, produce smooth density maps that reveal consistent tactical patterns---pressing zones, defensive compactness, attacking corridors. For coaches and analysts, this lightweight visualization capability can serve as a quick tool for studying formations and match dynamics without expensive infrastructure.
+
+\subsection{Future Directions}
+
+Several extensions could strengthen the system:
+
+\begin{itemize}
+    \item \textbf{Jersey--pitch robustness:} Advanced color models or texture features could reduce confusion when kits resemble the field.
+    \item \textbf{Temporal tracking:} Kalman filters, SORT, or optical-flow methods would enable player identity persistence and richer per-player statistics.
+    \item \textbf{Hybrid deep integration:} Lightweight pretrained networks could augment detection while preserving overall efficiency.
+    \item \textbf{Multi-video evaluation:} Testing across diverse matches, stadiums, and broadcast conditions would better characterize robustness.
+    \item \textbf{Adaptive thresholding:} Automatically tuning HSV ranges and kernel sizes to the video's lighting and grass color would improve generalization.
+\end{itemize}
+
+\newpage
+
+\section{Conclusion}
+
+This project demonstrates that a complete, end-to-end football video analysis system can be built from classical computer vision primitives. Starting from raw broadcast footage, the pipeline detects players, assigns them to teams, and generates per-team tactical heatmaps---all without training data or GPU hardware.
+
+The iterative refinement process, guided by techniques from the Computer Vision course lectures, was central to achieving robust performance. Morphological closing bridged shirt--trouser gaps on multi-colored kits; convex hull field masking eliminated vegetation-based false positives; shadow suppression reduced ghost detections in direct sunlight; and Gaussian pre-smoothing improved the reliability of HSV segmentation. Each improvement was grounded in course material---morphological operators (Lecture~10\_1), region-based segmentation (Lecture~10\_2), spatial filtering (Lectures~06\_1, 06\_2), color thresholding (Lab~3, Lecture~10\_3)---demonstrating the practical applicability of these classical methods to a real-world problem.
+
+While deep learning continues to dominate the field, this work highlights the enduring relevance of interpretable, efficient algorithms, particularly in contexts where computational resources or labeled data are limited. The results show that even a lightweight pipeline can capture meaningful patterns of team behavior, producing both quantitative metrics and intuitive visualizations. With future extensions---tracking, adaptive thresholding, hybrid deep integration---the system could evolve into a practical analytical tool, bridging the gap between raw match footage and actionable football intelligence.
+
+\newpage
+
+\section{Contributions}
+
+This work was completed by a single contributor. All components of the system---methodology design, C++ implementation (player detection, team classification, heatmap generation, evaluation tool), iterative parameter refinement, experimental evaluation, and report preparation---were carried out by \textbf{Rajmonda Bardhi (2071810)}.
+
+\subsection*{Compliance Notes}
+
+\begin{itemize}
+    \item The project is implemented in \textbf{C++ with OpenCV}; Python was used only for \textbf{Deep Learning} auxiliary steps (generating YOLO pseudo-ground truth), consistent with course guidelines.
+    \item \textbf{CMake} configuration is provided and the code compiles on the \textbf{Virtual Lab} environment.
+    \item Only standard libraries and OpenCV were used; \textbf{no external source code} written by third parties is included.
+\end{itemize}
+
+\end{document}

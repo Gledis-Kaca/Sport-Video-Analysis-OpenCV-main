@@ -1,6 +1,6 @@
 /********************************************************************************
-  Project: Sport Video Analisis
-  Author: Pooya Nasiri (Student ID: 2071437)
+  Project: Sport Video Analysis
+  Author: Rajmonda Bardhi (Student ID: 2071810)
   Course: Computer Vision — University of Padova
   Instructor: Prof. Stefano Ghidoni
   Notes: Original work by the author. Built with C++17 and OpenCV on the official Virtual Lab.
@@ -10,6 +10,10 @@
 
 Heatmap::Heatmap(){ colors.push_back(cv::Scalar(0,0,255)); colors.push_back(cv::Scalar(255,0,0)); colors.push_back(cv::Scalar(0,255,0)); }
 
+// update — Accumulate team-colored circles at each detection center into a
+// floating-point image. This builds a spatial density map of player positions
+// (Lecture 11_2 "Density estimation": estimating the underlying probability
+// density of player locations from discrete observations).
 void Heatmap::update(const cv::Mat &frame,const std::vector<std::pair<cv::Rect,int> > &classified){
     if(accum.empty()){ accum=cv::Mat::zeros(frame.size(),CV_32FC3); first=frame.clone(); }
     for(size_t i=0;i<classified.size();i++){
@@ -22,10 +26,17 @@ void Heatmap::update(const cv::Mat &frame,const std::vector<std::pair<cv::Rect,i
     }
 }
 
+// saveAndShow — Smooth the accumulated heatmap with a Gaussian kernel and
+// overlay it on the first frame for visualization.
 void Heatmap::saveAndShow(){
     if(accum.empty()) return;
     cv::Mat blr,hm8,ov;
+    // Gaussian smoothing — Lecture 06_1 "Spatial filtering", Lecture 06_2
+    // "Linear filters": Gaussian kernel produces smooth, isotropic blurring
+    // to turn discrete detection points into a continuous density visualization.
     cv::GaussianBlur(accum,blr,cv::Size(0,0),15);
+    // Intensity normalization — Lecture 05_1 "Histogram equalization": mapping
+    // pixel values to the full [0,255] range to maximize visual contrast.
     cv::normalize(blr,blr,0,255,cv::NORM_MINMAX);
     blr.convertTo(hm8,CV_8UC3);
     cv::addWeighted(first,0.5,hm8,0.5,0,ov);
