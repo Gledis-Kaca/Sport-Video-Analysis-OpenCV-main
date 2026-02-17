@@ -23,19 +23,33 @@ static const int teamsCount=2;
 // (Lecture 11_1 "K-means", slide 7: feature vector representation using color
 // information; Lab 3: HSV-based color segmentation to isolate regions).
 static cv::Vec3f avgNonGreenLab(const cv::Mat &roi){
-    cv::Mat hsv; cv::cvtColor(roi,hsv,cv::COLOR_BGR2HSV);
-    // Mask out green field pixels within the ROI (Lab 3: HSV color filtering).
-    cv::Mat g; cv::inRange(hsv,cv::Scalar(35,40,40),cv::Scalar(90,255,255),g);
+    // Focus on upper 60% of ROI — the jersey/shirt area is most discriminative
+    // for team classification. Lower body (shorts, legs, feet) adds noise.
+    int upperH=(int)(roi.rows*0.6);
+    if(upperH<1) upperH=roi.rows;
+    cv::Mat upper=roi(cv::Rect(0,0,roi.cols,upperH));
+    cv::Mat hsv; cv::cvtColor(upper,hsv,cv::COLOR_BGR2HSV);
+    // Mask out green field pixels and shadow pixels within the ROI
+    // (Lab 3: HSV color filtering; shadows have V<50).
+    cv::Mat greenM,shadowM,exclude;
+    cv::inRange(hsv,cv::Scalar(40,40,40),cv::Scalar(90,255,255),greenM);
+    cv::inRange(hsv,cv::Scalar(0,0,0),cv::Scalar(180,255,50),shadowM);
+    cv::bitwise_or(greenM,shadowM,exclude);
     // Convert to CIELab for perceptually uniform color features.
-    cv::Mat lab; cv::cvtColor(roi,lab,cv::COLOR_BGR2Lab); lab.convertTo(lab,CV_32F);
+    cv::Mat lab; cv::cvtColor(upper,lab,cv::COLOR_BGR2Lab); lab.convertTo(lab,CV_32F);
     cv::Mat r=lab.reshape(1,lab.rows*lab.cols);
-    std::vector<cv::Vec3f> v; v.reserve(r.rows);
-    for(int i=0;i<r.rows;i++) if(g.at<uchar>(i)==0) v.push_back(r.at<cv::Vec3f>(i));
-    if(v.empty()) return cv::Vec3f(0,0,0);
-    std::sort(v.begin(),v.end(),[](const cv::Vec3f &a,const cv::Vec3f &b){return cv::norm(a)>cv::norm(b);});
-    int n=(int)std::min<size_t>(v.size(),500);
-    cv::Vec3f s(0,0,0); for(int i=0;i<n;i++) s+=v[i];
-    return s*(1.0f/n);
+    std::vector<float> Lv,Av,Bv;
+    for(int i=0;i<r.rows;i++){
+        if(exclude.at<uchar>(i)==0){
+            cv::Vec3f p=r.at<cv::Vec3f>(i);
+            Lv.push_back(p[0]); Av.push_back(p[1]); Bv.push_back(p[2]);
+        }
+    }
+    if(Lv.empty()) return cv::Vec3f(0,0,0);
+    // Use median for robustness against outlier pixels (partial occlusion, noise).
+    std::sort(Lv.begin(),Lv.end()); std::sort(Av.begin(),Av.end()); std::sort(Bv.begin(),Bv.end());
+    int m=(int)Lv.size()/2;
+    return cv::Vec3f(Lv[m],Av[m],Bv[m]);
 }
 
 // findClosestBox — Simple nearest-neighbor tracking using Euclidean distance
@@ -96,14 +110,24 @@ std::vector<std::pair<cv::Rect,int> > classifyPlayers(const cv::Mat &frame,const
         }
         if(bj!=-1){ mapLab[bj]=fixed; used[bj]=true; }
     }
+    // Compute per-player distance to each cluster center for confidence scoring.
     std::vector<std::pair<cv::Rect,int> > out; out.reserve(boxes.size());
     std::map<int,std::pair<cv::Rect,int> > now;
     for(size_t i=0;i<boxes.size();i++){
         int raw=labels.at<int>((int)i);
         int team=mapLab[raw];
+        // Confidence: ratio of distance to own cluster vs distance to other cluster.
+        // High ratio means the player is close to the boundary between teams.
+        float dOwn=cv::norm(X.row(i)-centers.row(raw));
+        float dOther=cv::norm(X.row(i)-centers.row(1-raw));
+        float confidence=(dOther>0)?(dOwn/dOther):0;
         int mid=findClosestBox(boxes[i],lastFrameBoxes);
         if(mid!=-1){
-            if(lastFrameBoxes.at(mid).second!=team) team=lastFrameBoxes.at(mid).second;
+            // Only inherit previous frame's label when k-means is uncertain
+            // (confidence ratio > 0.7 means clusters are close for this player).
+            // When k-means is confident, trust the current color evidence.
+            if(confidence>0.7 && lastFrameBoxes.at(mid).second!=team)
+                team=lastFrameBoxes.at(mid).second;
             now[mid]=std::make_pair(boxes[i],team);
         }else{
             now[nextID++]=std::make_pair(boxes[i],team);
