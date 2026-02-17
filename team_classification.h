@@ -6,8 +6,8 @@
   Notes: Original work by the author. Built with C++17 and OpenCV on the official Virtual Lab.
          No external source code beyond standard libraries and OpenCV.
 ********************************************************************************/
-#ifndef CLASSIFICATION_H
-#define CLASSIFICATION_H
+#ifndef TEAM_CLASSIFICATION_H
+#define TEAM_CLASSIFICATION_H
 #include <opencv2/opencv.hpp>
 #include <vector>
 std::vector<std::pair<cv::Rect,int> > classifyPlayers(const cv::Mat &frame,const std::vector<cv::Rect> &boxes);
